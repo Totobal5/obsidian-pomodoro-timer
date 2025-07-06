@@ -266,7 +266,8 @@ export default class Timer implements Readable<TimerStore> {
 
     public reset() {
         this.update((state) => {
-            if (state.elapsed > 0) {
+            // Only log if at least a minute has passed.
+            if (state.elapsed >= 60000) {
                 this.logger.log(this.createLogContext(state))
             }
 
@@ -335,7 +336,6 @@ export default class Timer implements Readable<TimerStore> {
     }
 
     public setDurations(workLen: number, breakLen: number) {
-        // --- CAMBIO CLAVE: Llamar al nuevo método público en el plugin ---
         this.plugin.updateSettings({ workLen, breakLen });
     }
 
