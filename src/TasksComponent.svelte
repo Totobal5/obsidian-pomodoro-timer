@@ -4,10 +4,12 @@
     import Tasks, { type TaskItem } from 'Tasks'
     import { settings } from 'stores'
     import { Menu } from 'obsidian'
+    import type Timer from './Timer'
     import { slide } from 'svelte/transition'
 
     export let tasks: Tasks
     export let tracker: TaskTracker
+    export let timer: Timer
     export let render: (content: string, el: HTMLElement) => void
     const r = (content: string, el: HTMLElement) => {
         render(content, el)
@@ -16,7 +18,7 @@
     let status = ''
     let query = ''
 
-    // 1. La lista se filtra como antes
+    // Lógica de filtrado, ordenación y agrupación
     $: filtered = $tasks
         ? $tasks.list.filter((item) => {
               let statusMatch = true
@@ -31,21 +33,17 @@
               return statusMatch && textMatch
           })
         : []
-
-    // 2. NUEVO: Se ordena la lista filtrada
+    
     $: sorted = filtered.slice().sort((a, b) => {
-        // Primero, por estado: no completadas (false) van antes que completadas (true)
         if (a.checked !== b.checked) {
             return a.checked ? 1 : -1;
         }
-        // Segundo, por orden alfabético del nombre de la tarea
         return a.name.localeCompare(b.name);
     });
 
-    // 3. Se agrupa la lista ya ordenada
     $: groupedTasks = groupBy(sorted, 'fileName');
-
-    let collapsedGroups: { [key: string]: boolean } = {};
+    
+    let collapsedGroups: { [key:string]: boolean } = {};
 
     const toggleGroup = (fileName: string) => {
         collapsedGroups[fileName] = !collapsedGroups[fileName];
@@ -73,9 +71,7 @@
     }
 
     const progress = (item: TaskItem) => {
-        if (!$settings.showTaskProgress) {
-            return 0
-        }
+        if (!$settings.showTaskProgress) return 0
         if (item.expected > 0 && item.actual >= 0) {
             return ((item.actual / item.expected) * 100).toFixed(2)
         }
@@ -88,29 +84,15 @@
             let unfinished = expected - actual
             let max = Math.max(expected, actual)
             if (max > 10) {
-                if (unfinished > 0) {
-                    return `◌ x ${unfinished} 🍅 x ${actual}`
-                } else {
-                    return `🍅 x ${expected}  🥫 x ${Math.abs(unfinished)}`
-                }
+                return unfinished > 0 ? `◌ x ${unfinished} 🍅 x ${actual}` : `🍅 x ${expected}  🥫 x ${Math.abs(unfinished)}`
             } else {
-                if (unfinished > 0) {
-                    return `${'🍅'.repeat(actual)}${'◌'.repeat(unfinished)}`
-                } else {
-                    return `${'🍅'.repeat(expected)}${'🥫'.repeat(
-                        Math.abs(unfinished),
-                    )}`
-                }
+                return unfinished > 0 ? `${'🍅'.repeat(actual)}${'◌'.repeat(unfinished)}` : `${'🍅'.repeat(expected)}${'🥫'.repeat(Math.abs(unfinished))}`
             }
         } else {
-            return actual > 10
-                ? `🍅 x ${actual}`
-                : actual > 0
-                ? `${'🍅'.repeat(actual)}`
-                : `- -`
+            return actual > 10 ? `🍅 x ${actual}` : actual > 0 ? `${'🍅'.repeat(actual)}` : `- -`
         }
     }
-
+    
     const showTaskMenu = (task: TaskItem) => (e: MouseEvent) => {
         const menu = new Menu()
         menu.addItem((item) => {
@@ -120,87 +102,243 @@
         })
         menu.showAtMouseEvent(e)
     }
+
+    $: strokeDasharray = 2 * Math.PI * 45;
+    $: strokeDashoffset = $timer.count > 0 ? strokeDasharray * (1 - ($timer.count - $timer.remained.millis) / $timer.count) : strokeDasharray;
 </script>
 
-<div class="pomodoro-tasks-wrapper">
-    <div class="pomodoro-tasks-header">
-        <div class="pomodoro-tasks-header-title">
-            <span class="pomodoro-tasks-count">
-                {filtered.length} tareas
-            </span>
-        </div>
-        {#if $tasks.list.length > 0}
-            <div class="pomodoro-tasks-active">
-                {#if $tracker.task}
-                    <div class="pomodoro-tasks-item">
-                        <div class="pomodoro-tasks-name">
-                            <input type="text" value={$tracker.task?.name} on:input={changeTaskName} />
-                            <span class="pomodoro-tasks-remove" on:click={removeTask}>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-                            </span>
-                        </div>
-                    </div>
-                {/if}
-            </div>
-            <div class="pomodoro-tasks-toolbar">
-                <div class="pomodoro-tasks-filters">
-                    <span on:click={() => (status = '')} class="pomodoro-tasks-filter {status === '' ? 'filter-active' : ''}">All</span>
-                    <span on:click={() => (status = 'todo')} class="pomodoro-tasks-filter {status === 'todo' ? 'filter-active' : ''}">Todo</span>
-                    <span on:click={() => (status = 'completed')} class="pomodoro-tasks-filter {status === 'completed' ? 'filter-active' : ''}">Completed</span>
-                </div>
-            </div>
-            <div class="pomodoro-tasks-text-filter">
-                <input type="text" bind:value={query} placeholder="Search..." />
-            </div>
-        {/if}
-    </div>
-    
-    <div class="pomodoro-tasks-list">
-        {#if Object.keys(groupedTasks).length > 0}
-            {#each Object.entries(groupedTasks) as [fileName, taskItems] (fileName)}
-                <div class="task-group">
-                    <div class="task-group-header" on:click={() => toggleGroup(fileName)}>
-                        <svg class="group-arrow {collapsedGroups[fileName] ? 'is-collapsed' : ''}" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-                        <span>{fileName.replace('.md', '')}</span>
-                    </div>
+<!-- Contenedor Principal de la Vista -->
+<div class="pomodoro-view-container">
 
-                    {#if !collapsedGroups[fileName]}
-                        <div class="task-list-items" transition:slide>
-                            {#each taskItems as item (item.blockLink || item.line)}
-                                <div
-                                    on:click={() => activeTask(item)}
-                                    on:contextmenu={showTaskMenu(item)}
-                                    style="background: linear-gradient(to right, rgba(var(--color-green-rgb),0.25) {progress(item)}%, transparent 0%)"
-                                    class="pomodoro-tasks-item {item.checked ? 'pomodoro-tasks-checked' : ''}"
-                                >
-                                    <div class="pomodoro-tasks-name">
-                                        {#if item.checked}
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check"><path d="M20 6 9 17l-5-5" /></svg>
-                                        {:else}
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-circle"><circle cx="12" cy="12" r="10" /></svg>
-                                        {/if}
-                                        <TaskItemComponent render={r} content={item.description} />
-                                    </div>
-                                    <div class="pomodoro-tasks-progress">
-                                        {progressText(item)}
-                                    </div>
-                                </div>
-                            {/each}
+    <!-- Sección del Temporizador -->
+    <div class="pomodoro-timer-container">
+        <div class="timer-display">
+            <svg class="timer-circle-svg" viewBox="0 0 100 100">
+                <circle class="timer-circle-background" cx="50" cy="50" r="45"></circle>
+                <circle 
+                    class="timer-circle-progress" 
+                    cx="50" 
+                    cy="50" 
+                    r="45"
+                    style="stroke-dasharray: {strokeDasharray}; stroke-dashoffset: {strokeDashoffset};"
+                ></circle>
+            </svg>
+            <div class="timer-text">
+                <span>{$timer.remained.minutes}</span>
+                <span class="timer-colon">:</span>
+                <span>{$timer.remained.seconds}</span>
+            </div>
+        </div>
+        <div class="timer-controls">
+            <button class="timer-button" on:click={() => timer.toggleTimer()} title={$timer.running ? 'Pausar' : 'Reanudar'}>
+                {#if $timer.running}
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-pause"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></svg>
+                {:else}
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-play"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+                {/if}
+            </button>
+            <button class="timer-button" on:click={() => timer.reset()} title="Resetear">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-rotate-cw"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/></svg>
+            </button>
+        </div>
+        <div class="timer-mode" on:click={() => timer.toggleMode()}>
+            {$timer.mode === 'WORK' ? 'Sesión de Trabajo' : 'Descanso'}
+        </div>
+    </div>
+
+    <!-- Sección de Tareas -->
+    <div class="pomodoro-tasks-wrapper">
+        <div class="pomodoro-tasks-header">
+            <div class="pomodoro-tasks-header-title">
+                <span class="pomodoro-tasks-count">
+                    {filtered.length} tareas
+                </span>
+            </div>
+            {#if $tasks.list.length > 0}
+                <div class="pomodoro-tasks-active">
+                    {#if $tracker.task}
+                        <div class="pomodoro-tasks-item">
+                            <div class="pomodoro-tasks-name">
+                                <input type="text" value={$tracker.task?.name} on:input={changeTaskName} />
+                                
+                                {#if $timer.running && $timer.mode === 'WORK'}
+                                    <span class="pomodoro-tasks-finish" on:click={() => timer.finishEarly()} title="Finalizar sesión de trabajo">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check-circle-2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>
+                                    </span>
+                                {/if}
+
+                                <span class="pomodoro-tasks-remove" on:click={removeTask}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                                </span>
+                            </div>
                         </div>
                     {/if}
                 </div>
-            {/each}
-        {:else if query}
-            <div class="pomodoro-tasks-list--empty">No hay tareas que coincidan con tu búsqueda.</div>
-        {:else}
-            <div class="pomodoro-tasks-list--empty">No se encontraron tareas en el vault.</div>
-        {/if}
+                <div class="pomodoro-tasks-toolbar">
+                    <div class="pomodoro-tasks-filters">
+                        <span on:click={() => (status = '')} class="pomodoro-tasks-filter {status === '' ? 'filter-active' : ''}">All</span>
+                        <span on:click={() => (status = 'todo')} class="pomodoro-tasks-filter {status === 'todo' ? 'filter-active' : ''}">Todo</span>
+                        <span on:click={() => (status = 'completed')} class="pomodoro-tasks-filter {status === 'completed' ? 'filter-active' : ''}">Completed</span>
+                    </div>
+                </div>
+                <div class="pomodoro-tasks-text-filter">
+                    <input type="text" bind:value={query} placeholder="Search..." />
+                </div>
+            {/if}
+        </div>
+        
+        <div class="pomodoro-tasks-list">
+            {#if Object.keys(groupedTasks).length > 0}
+                {#each Object.entries(groupedTasks) as [fileName, taskItems] (fileName)}
+                    <div class="task-group">
+                        <div class="task-group-header" on:click={() => toggleGroup(fileName)}>
+                            <svg class="group-arrow {collapsedGroups[fileName] ? 'is-collapsed' : ''}" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                            <span>{fileName.replace('.md', '')}</span>
+                        </div>
+
+                        {#if !collapsedGroups[fileName]}
+                            <div class="task-list-items" transition:slide>
+                                {#each taskItems as item (item.blockLink || item.line)}
+                                    <div
+                                        on:click={() => activeTask(item)}
+                                        on:contextmenu={showTaskMenu(item)}
+                                        style="background: linear-gradient(to right, rgba(var(--color-green-rgb),0.25) {progress(item)}%, transparent 0%)"
+                                        class="pomodoro-tasks-item {item.checked ? 'pomodoro-tasks-checked' : ''}"
+                                    >
+                                        <div class="pomodoro-tasks-name">
+                                            {#if item.checked}
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check"><path d="M20 6 9 17l-5-5" /></svg>
+                                            {:else}
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-circle"><circle cx="12" cy="12" r="10" /></svg>
+                                            {/if}
+                                            <TaskItemComponent render={r} content={item.description} />
+                                        </div>
+                                        <div class="pomodoro-tasks-progress">
+                                            {progressText(item)}
+                                        </div>
+                                    </div>
+                                {/each}
+                            </div>
+                        {/if}
+                    </div>
+                {/each}
+            {:else if query}
+                <div class="pomodoro-tasks-list--empty">No hay tareas que coincidan con tu búsqueda.</div>
+            {:else}
+                <div class="pomodoro-tasks-list--empty">No se encontraron tareas en el vault.</div>
+            {/if}
+        </div>
     </div>
 </div>
 
-
 <style>
-/* ... (todos los estilos se mantienen igual) ... */
+/* Estilos para el contenedor principal */
+.pomodoro-view-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+/* Estilos para el temporizador */
+.pomodoro-timer-container {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+.timer-display {
+    position: relative;
+    width: 120px;
+    height: 120px;
+    margin-bottom: 10px;
+}
+.timer-circle-svg {
+    transform: rotate(-90deg);
+}
+.timer-circle-background {
+    fill: none;
+    stroke: var(--background-modifier-border);
+    stroke-width: 5;
+}
+.timer-circle-progress {
+    fill: none;
+    stroke: var(--interactive-accent);
+    stroke-width: 5;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.3s linear;
+}
+.timer-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 2.2em;
+    font-family: var(--font-monospace);
+    color: var(--text-normal);
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+}
+.timer-colon {
+    margin: 0 2px;
+    animation: blink 1s infinite;
+}
+@keyframes blink {
+    50% { opacity: 0; }
+}
+.timer-controls {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 10px;
+}
+.timer-button {
+    background-color: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-muted);
+}
+.timer-button svg {
+    width: 20px;
+    height: 20px;
+}
+.timer-button:hover {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+.timer-mode {
+    font-weight: bold;
+    cursor: pointer;
+    padding: 5px 10px;
+    border-radius: 5px;
+}
+.timer-mode:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+/* Estilos para la sección de tareas */
+.pomodoro-tasks-wrapper {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: none;
+}
+.pomodoro-tasks-header, .pomodoro-tasks-text-filter, .pomodoro-tasks-toolbar, .pomodoro-tasks-active {
+    flex-shrink: 0;
+}
+.pomodoro-tasks-list {
+    flex-grow: 1;
+    overflow-y: auto;
+    border-top: 1px solid var(--background-modifier-border);
+}
 .pomodoro-tasks-list--empty {
     padding: 1rem;
     text-align: center;
@@ -221,6 +359,9 @@
     font-size: 0.8rem;
     font-weight: bold;
     cursor: pointer;
+    position: sticky;
+    top: 0;
+    z-index: 1;
 }
 .task-group-header:hover {
     background-color: var(--background-modifier-hover);
@@ -236,14 +377,11 @@
 .task-list-items {
     padding-left: 10px;
 }
-.pomodoro-tasks-wrapper {
-    width: 100%; border: 1px solid var(--background-modifier-border);
-    border-radius: 5px;
-}
 .pomodoro-tasks-header-title {
     width: 100%;
     padding: 0.5rem 1rem;
-    font-size: 1rem; font-weight: bold;
+    font-size: 1rem; 
+    font-weight: bold;
     display: flex;
     justify-content: flex-end; 
     align-items: center; 
@@ -258,9 +396,9 @@
 }
 .pomodoro-tasks-item {
     display: flex;
-    flex-direction: column; width: 100%;
+    flex-direction: column; 
+    width: 100%;
     padding: 0.5rem 1rem;
-    display: flex;
 }
 .pomodoro-tasks-list .pomodoro-tasks-item {
     cursor: pointer; 
@@ -287,11 +425,7 @@
     border-radius: 0;
     background: transparent; 
 }
-.pomodoro-tasks-wrapper input:active {
-    border: none;
-    box-shadow: none;
-}
-.pomodoro-tasks-wrapper input:focus {
+.pomodoro-tasks-wrapper input:active, .pomodoro-tasks-wrapper input:focus {
     border: none;
     box-shadow: none; 
 }
@@ -301,22 +435,21 @@
 .pomodoro-tasks-filter {
     font-size: 0.8rem;
     padding: 1px 7px;
-    border-radius: 10px; cursor: pointer;
+    border-radius: 10px; 
+    cursor: pointer;
     color: var(--text-muted);
-}
-.pomodoro-tasks-name svg {
-    margin-right: 5px;
-}
-.pomodoro-tasks-name svg {
-    color: var(--color-blue); 
-}
-.pomodoro-tasks-checked .pomodoro-tasks-name svg {
-    color: var(--color-green);
 }
 .pomodoro-tasks-name {
     width: 100%;
     display: flex;
-    align-items: baseline; 
+    align-items: center; 
+}
+.pomodoro-tasks-name svg {
+    margin-right: 5px;
+    color: var(--color-blue); 
+}
+.pomodoro-tasks-checked .pomodoro-tasks-name svg {
+    color: var(--color-green);
 }
 .filter-active {
     background-color: var(--interactive-accent);
@@ -329,13 +462,20 @@
     text-decoration: line-through;
     color: var(--text-muted);
 }
-.pomodoro-tasks-remove {
+.pomodoro-tasks-remove, .pomodoro-tasks-finish {
     cursor: pointer;
+    margin-left: 8px;
+    display: flex;
+    align-items: center;
+}
+.pomodoro-tasks-finish {
+    color: var(--color-green);
 }
 .pomodoro-tasks-progress {
     font-size: 0.7rem;
     color: var(--text-muted);
     text-align: end;
-    text-wrap: nowrap; overflow: hidden;
+    text-wrap: nowrap; 
+    overflow: hidden;
 }
 </style>

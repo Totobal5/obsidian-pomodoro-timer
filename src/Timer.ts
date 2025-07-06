@@ -11,9 +11,11 @@ import type { TaskItem } from 'Tasks'
 
 export type Mode = 'WORK' | 'BREAK'
 
+// --- CAMBIO: La estructura ahora tiene minutos y segundos separados ---
 export type TimerRemained = {
     millis: number
-    human: string
+    minutes: string
+    seconds: string
 }
 
 const DEFAULT_TASK: TaskItem = {
@@ -42,7 +44,6 @@ const DEFAULT_TASK: TaskItem = {
 export type TimerState = {
     autostart: boolean
     running: boolean
-    // lastTick: number
     mode: Mode
     elapsed: number
     startTime: number | null
@@ -62,19 +63,12 @@ export default class Timer implements Readable<TimerStore> {
     static DEFAULT_NOTIFICATION_AUDIO = new Audio(DEFAULT_NOTIFICATION)
 
     private plugin: PomodoroTimerPlugin
-
     private logger: Logger
-
     private state: TimerState
-
     private store: Readable<TimerStore>
-
     private clock: any
-
     private update
-
     private unsubscribers: Unsubscriber[] = []
-
     public subscribe
 
     constructor(plugin: PomodoroTimerPlugin) {
@@ -86,7 +80,6 @@ export default class Timer implements Readable<TimerStore> {
             workLen: plugin.getSettings().workLen,
             breakLen: plugin.getSettings().breakLen,
             running: false,
-            // lastTick: 0,
             mode: 'WORK',
             elapsed: 0,
             startTime: null,
@@ -96,9 +89,7 @@ export default class Timer implements Readable<TimerStore> {
         }
 
         let store = writable(this.state)
-
         this.update = store.update
-
         this.store = derived(store, ($state) => ({
             ...$state,
             remained: this.remain($state.count, $state.elapsed),
@@ -117,15 +108,16 @@ export default class Timer implements Readable<TimerStore> {
         }
     }
 
+    // --- CAMBIO: La función ahora devuelve un objeto con minutos y segundos ---
     private remain(count: number, elapsed: number): TimerRemained {
         let remained = count - elapsed
         let min = Math.floor(remained / 60000)
         let sec = Math.floor((remained % 60000) / 1000)
-        let minStr = min < 10 ? `0${min}` : min.toString()
-        let secStr = sec < 10 ? `0${sec}` : sec.toString()
+        
         return {
             millis: remained,
-            human: `${minStr} : ${secStr}`,
+            minutes: min < 10 ? `0${min}` : min.toString(),
+            seconds: sec < 10 ? `0${sec}` : sec.toString(),
         }
     }
 
@@ -152,17 +144,33 @@ export default class Timer implements Readable<TimerStore> {
             this.timeup()
         }
     }
+    
+    private timeup(earlyFinish: boolean = false) {
+        let autostart = false;
+        let originalState = { ...this.state };
 
-    private timeup() {
-        let autostart = false
-        this.update((state) => {
-            const ctx = this.createLogContext(state)
-            this.processLog(ctx)
-            autostart = state.autostart
-            return this.endSession(state)
-        })
-        if (autostart) {
-            this.start()
+        if (earlyFinish) {
+            originalState.count = originalState.elapsed;
+        }
+
+        try {
+            const ctx = this.createLogContext(originalState);
+            this.processLog(ctx);
+            autostart = originalState.autostart;
+        } catch (error) {
+            console.error("Error al procesar el log del pomodoro:", error);
+            new Notice("Error al guardar el log, pero la sesión continuará.");
+        } finally {
+            this.update(state => this.endSession(state));
+            if (autostart) {
+                this.start();
+            }
+        }
+    }
+    
+    public finishEarly() {
+        if (this.state.running && this.state.mode === 'WORK') {
+            this.timeup(true);
         }
     }
 
@@ -192,7 +200,6 @@ export default class Timer implements Readable<TimerStore> {
         this.update((s) => {
             let now = new Date().getTime()
             if (!s.inSession) {
-                // new session
                 s.elapsed = 0
                 s.duration = s.mode === 'WORK' ? s.workLen : s.breakLen
                 s.count = s.duration * 60 * 1000
@@ -209,7 +216,6 @@ export default class Timer implements Readable<TimerStore> {
     }
 
     private endSession(state: TimerState) {
-        // setup new session
         if (state.breakLen == 0) {
             state.mode = 'WORK'
         } else {
@@ -342,7 +348,6 @@ export default class Timer implements Readable<TimerStore> {
                     state.mode == 'WORK' ? state.workLen : state.breakLen
                 state.count = state.duration * 60 * 1000
             }
-
             return state
         })
     }

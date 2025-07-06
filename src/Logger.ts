@@ -1,7 +1,7 @@
 import { type TimerState, type Mode } from 'Timer'
 import * as utils from 'utils'
 import PomodoroTimerPlugin from 'main'
-import { TFile, Notice, moment, EditorPosition, Editor, MarkdownView } from 'obsidian'
+import { TFile, Notice, moment } from 'obsidian'
 import { type TaskItem } from 'Tasks'
 
 export type TimerLog = {
@@ -53,104 +53,59 @@ export default class Logger {
         if (logFile) {
             const logText = await this.toText(log, logFile)
             if (logText) {
-                // --- DEBUG LOGGING ---
-                console.log("--- DEBUG LOGGING ---");
-                console.log("Log file:", logFile.path);
-                console.log("Task info from context:", ctx.task);
-                const cleanBlockLink = ctx.task?.blockLink ? ctx.task.blockLink.trim() : null;
-                console.log("Expected blockLink (cleaned, as is):", cleanBlockLink ? `${cleanBlockLink}` : "N/A (no blockLink in context)");
-                console.log("Log text to insert:", logText);
-                // --- FIN DE DEPURACIÓN ---
-
-                if (ctx.task && ctx.task.blockLink) {
+                // El código para añadir el log al archivo se mantiene igual
+                // ... (código existente para encontrar el block ID y añadir el texto)
+                 if (ctx.task && ctx.task.blockLink) {
                     const searchBlockLink = ctx.task.blockLink.trim();
                     if (!searchBlockLink) {
                          new Notice(`Block ID de la tarea vacío o inválido. El log se añadió al final.`);
-                         console.warn(`WARNING: Cleaned blockLink for task is empty. Log appended to end.`);
                          await this.plugin.app.vault.append(logFile, `\n${logText}`);
                          return;
                     }
 
                     const fileContent = await this.plugin.app.vault.read(logFile);
                     const lines = fileContent.split('\n');
-
                     let targetLineIndex = -1;
 
-                    // --- DEPURACIÓN DE BÚSQUEDA DE TAREA ---
-                    console.log("Total lines in file:", lines.length);
-                    if (ctx.task.line !== undefined && lines[ctx.task.line] && lines[ctx.task.line].includes(`${searchBlockLink}`)) {
-                        targetLineIndex = ctx.task.line;
-                        console.log(`Found task by exact line number (${ctx.task.line}) and cleaned blockLink.`);
-                    } else {
-                        console.log(`Task not found at reported line ${ctx.task.line} or blockLink mismatch. Searching linearly with cleaned blockLink...`);
-                        for (let i = 0; i < lines.length; i++) {
-                            if (lines[i].includes(`${searchBlockLink}`)) {
-                                targetLineIndex = i;
-                                console.log(`Found task by linear search at line: ${i}`);
-                                break;
-                            }
+                    for (let i = 0; i < lines.length; i++) {
+                        if (lines[i].includes(`${searchBlockLink}`)) {
+                            targetLineIndex = i;
+                            break;
                         }
                     }
-                    console.log("Final targetLineIndex (tarea principal):", targetLineIndex);
-                    // --- FIN DE DEPURACIÓN DE BÚSQUEDA DE TAREA ---
-
 
                     if (targetLineIndex !== -1) {
                         const taskLine = lines[targetLineIndex];
-                        console.log("Task line found:", taskLine);
-
                         const indentationMatch = taskLine.match(/^([	 ]*)-\s\[.?\]/);
                         const baseIndentation = indentationMatch ? indentationMatch[1] : '';
-
-                        let logIndentation: string;
-                        if (baseIndentation.trim() === '') {
-                            logIndentation = '\t';
-                        } else {
-                            logIndentation = baseIndentation + '\t';
-                        }
-
-                        console.log("Calculated baseIndentation (de la tarea):", JSON.stringify(baseIndentation));
-                        console.log("Calculated logIndentation (para el log):", JSON.stringify(logIndentation));
+                        let logIndentation = baseIndentation ? baseIndentation + '\t' : '\t';
 
                         let insertIndex = targetLineIndex + 1;
-
                         for (let i = targetLineIndex + 1; i < lines.length; i++) {
                             const currentLine = lines[i];
-
                             if (currentLine.startsWith(logIndentation) && (currentLine.trim().startsWith('-') || currentLine.trim().startsWith('*'))) {
                                 insertIndex = i + 1;
                             } else if (currentLine.trim() === '') {
                                 insertIndex = i + 1;
                             } else {
-                                console.log(`Found end of indented block at line ${i}. Breaking loop.`);
                                 break;
                             }
                         }
-                        console.log("Final insertIndex (para el nuevo log):", insertIndex);
-
+                        
                         lines.splice(insertIndex, 0, logIndentation + logText);
                         const updatedContent = lines.join('\n');
                         await this.plugin.app.vault.modify(logFile, updatedContent);
 
-                        const activeLeaf = this.plugin.app.workspace.getActiveViewOfType(MarkdownView)?.leaf;
-                        if (activeLeaf && activeLeaf.view instanceof MarkdownView && activeLeaf.view.file === logFile) {
-                            const editor = activeLeaf.view.editor;
-                            editor.setCursor({line: insertIndex, ch: (logIndentation + logText).length});
-                        }
-
                     } else {
-                        new Notice(`Tarea con block ID ${searchBlockLink} no encontrada en el archivo. El log se añadió al final.`);
-                        console.error(`ERROR: Task with block ID ${searchBlockLink} not found in file ${logFile.path}. Log appended to end.`);
+                        new Notice(`Tarea con block ID ${searchBlockLink} no encontrada. El log se añadió al final.`);
                         await this.plugin.app.vault.append(logFile, `\n${logText}`);
                     }
                 } else {
                     new Notice(`No se proporcionó block ID para la tarea. El log se añadió al final.`);
-                    console.warn(`WARNING: No task or blockLink provided for logging. Log appended to end.`);
                     await this.plugin.app.vault.append(logFile, `\n${logText}`);
                 }
             }
         }
-
         return logFile
     }
 
@@ -221,7 +176,10 @@ export default class Logger {
                 return ''
             }
         } else {
-            if (!log.finished) {
+            // --- CAMBIO CLAVE ---
+            // Solo se omite el log si es un DESCANSO no terminado.
+            // Las sesiones de TRABAJO siempre se registran.
+            if (!log.finished && log.mode === 'BREAK') {
                 return ''
             }
 
@@ -236,7 +194,6 @@ export default class Logger {
             if (settings.logFormat === 'VERBOSE') {
                 const taskId = log.task.blockLink ? log.task.blockLink.replace('^', '') : 'N/A';
                 const emoji = log.mode == 'WORK' ? '🍅' : '🥤'
-                // CAMBIO CLAVE: Espacio después de "(taskID:: ${taskId})"
                 return `- ${emoji} (pomodoro::${log.mode}) (taskID:: ${taskId}) (duration:: ${
                     log.duration
                 }m) (begin:: ${begin.format(

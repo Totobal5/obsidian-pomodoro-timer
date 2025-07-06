@@ -1,12 +1,13 @@
 import { ItemView, WorkspaceLeaf } from 'obsidian'
-import TimerComponent from './TimerViewComponent.svelte'
+// CAMBIO: Asegúrate de que el nombre del componente importado coincida con tu archivo
+import TasksComponent from './TasksComponent.svelte' 
 import PomodoroTimerPlugin from 'main'
 import { MarkdownRenderer } from 'obsidian'
 
 export const VIEW_TYPE_TIMER = 'timer-view'
 
 export class TimerView extends ItemView {
-    private component?: TimerComponent
+    private component?: TasksComponent // El tipo también debe coincidir
     private plugin
 
     constructor(plugin: PomodoroTimerPlugin, leaf: WorkspaceLeaf) {
@@ -24,9 +25,10 @@ export class TimerView extends ItemView {
     }
 
     async onOpen() {
-        this.component = new TimerComponent({
+        this.component = new TasksComponent({
             target: this.contentEl,
             props: {
+                // Aseguramos que se pasen todos los props necesarios
                 timer: this.plugin.timer,
                 tasks: this.plugin.tasks,
                 tracker: this.plugin.tracker,
