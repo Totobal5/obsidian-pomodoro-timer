@@ -1,10 +1,11 @@
 import { TimerView, VIEW_TYPE_TIMER } from 'TimerView'
 import { Notice, Plugin, WorkspaceLeaf } from 'obsidian'
 import PomodoroSettings, { type Settings } from 'Settings'
-import StatusBar from 'StatusBarComponent.svelte'
+import StatusBar from "StatusBarComponent.svelte"
 import Timer from 'Timer'
 import Tasks from 'Tasks'
 import TaskTracker from 'TaskTracker'
+import { extractTaskComponents } from 'utils'
 
 export default class PomodoroTimerPlugin extends Plugin {
     private settingTab?: PomodoroSettings
@@ -82,6 +83,36 @@ export default class PomodoroTimerPlugin extends Plugin {
                 })
             },
         })
+
+        this.registerEvent(
+            this.app.workspace.on('editor-change', (editor) => {
+                const cursor = editor.getCursor();
+
+                // Si el cursor está en la primera línea, no hay nada que hacer
+                if (cursor.line === 0) {
+                    return;
+                }
+
+                const currentLine = editor.getLine(cursor.line);
+
+                // Se activa solo si el usuario acaba de presionar Enter y está en una línea nueva y vacía
+                if (currentLine.trim() === '') {
+                    const previousLineNumber = cursor.line - 1;
+                    const previousLineText = editor.getLine(previousLineNumber);
+
+                    // Se utiliza la función importada para verificar si la línea es una tarea
+                    const taskComponents = extractTaskComponents(previousLineText);
+
+                    // Si la línea anterior es una tarea con texto y sin un ID de bloque...
+                    if (taskComponents && taskComponents.body.trim().length > 0 && !taskComponents.blockLink) {
+                        const blockId = ` ^${Math.random().toString(36).substring(2, 6)}`;
+
+                        // Se añade el ID de bloque al final de la línea anterior
+                        editor.replaceRange(blockId, { line: previousLineNumber, ch: previousLineText.length });
+                    }
+                }
+            })
+        );        
     }
 
     public getSettings(): Settings {

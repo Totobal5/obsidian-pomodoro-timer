@@ -44,21 +44,9 @@ export default class TaskTracker implements TaskTrackerStore {
             }),
         )
 
-        plugin.registerEvent(
-            //loadtasks on file change
-            plugin.app.workspace.on('active-leaf-change', () => {
-                let file = this.plugin.app.workspace.getActiveFile()
-                if (!this.state.pinned) {
-                    this.store.update((state) => {
-                        if (state.file?.path !== file?.path) {
-                            state.task = undefined
-                        }
-                        state.file = file ?? state.file
-                        return state
-                    })
-                }
-            }),
-        )
+        // --- SE ELIMINÓ EL BLOQUE "active-leaf-change" ---
+        // El siguiente evento se eliminó para evitar que la tarea se deseleccione
+        // al cambiar de nota.
 
         plugin.app.workspace.onLayoutReady(() => {
             let file = this.plugin.app.workspace.getActiveFile()
@@ -88,6 +76,11 @@ export default class TaskTracker implements TaskTrackerStore {
         await this.ensureBlockId(task)
         this.store.update((state) => {
             state.task = task
+            // También actualizamos el archivo de referencia al seleccionar una nueva tarea
+            const file = this.plugin.app.vault.getAbstractFileByPath(task.path);
+            if (file && file instanceof TFile) {
+                state.file = file;
+            }
             return state
         })
     }
