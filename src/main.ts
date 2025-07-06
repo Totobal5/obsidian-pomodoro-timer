@@ -1,5 +1,5 @@
 import { TimerView, VIEW_TYPE_TIMER } from 'TimerView'
-import { Notice, Plugin, WorkspaceLeaf, moment } from 'obsidian' // <--- AÑADE "moment" A LA IMPORTACIÓN
+import { Notice, Plugin, WorkspaceLeaf, moment, TFile } from 'obsidian'
 import PomodoroSettings, { type Settings } from 'Settings'
 import StatusBar from 'StatusBarComponent.svelte'
 import Timer from 'Timer'
@@ -22,26 +22,21 @@ export default class PomodoroTimerPlugin extends Plugin {
         this.timer = new Timer(this)
         this.tasks = new Tasks(this)
 
+        this.app.workspace.onLayoutReady(() => {
+            this.tasks?.loadAllVaultTasks();
+        });
+
         this.registerView(VIEW_TYPE_TIMER, (leaf) => new TimerView(this, leaf))
         this.registerView('stats-view', (leaf) => new StatsView(leaf, this));
 
-        // ... (ribbon y status bar se mantienen igual)
         this.addRibbonIcon('timer', 'Toggle timer panel', () => {
-            let { workspace } = this.app
-            let leaves = workspace.getLeavesOfType(VIEW_TYPE_TIMER)
-            if (leaves.length > 0) {
-                workspace.detachLeavesOfType(VIEW_TYPE_TIMER)
-            } else {
-                this.activateView()
-            }
+            this.activateView()
         })
 
         const status = this.addStatusBarItem()
         status.className = `${status.className} mod-clickable`
         new StatusBar({ target: status, props: { store: this.timer } })
 
-
-        // ... (los otros comandos se mantienen igual)
         this.addCommand({
             id: 'toggle-timer',
             name: 'Toggle timer',
@@ -51,13 +46,7 @@ export default class PomodoroTimerPlugin extends Plugin {
             id: 'toggle-timer-panel',
             name: 'Toggle timer panel',
             callback: () => {
-                let { workspace } = this.app
-                let leaves = workspace.getLeavesOfType(VIEW_TYPE_TIMER)
-                if (leaves.length > 0) {
-                    workspace.detachLeavesOfType(VIEW_TYPE_TIMER)
-                } else {
-                    this.activateView()
-                }
+                this.activateView()
             },
         })
         this.addCommand({
@@ -80,7 +69,6 @@ export default class PomodoroTimerPlugin extends Plugin {
             callback: () => { this.activateStatsView() },
         });
 
-        // --- NUEVO COMANDO DE CORRECCIÓN ---
         this.addCommand({
             id: 'correct-log-times',
             name: 'Correct pomodoro log times',
@@ -107,10 +95,14 @@ export default class PomodoroTimerPlugin extends Plugin {
         );
     }
 
-    // ... (getSettings y onunload se mantienen igual)
     public getSettings(): Settings {
         return ( this.settingTab?.getSettings() || PomodoroSettings.DEFAULT_SETTINGS )
     }
+
+    public updateSettings(newSettings: Partial<Settings>) {
+        this.settingTab?.updateSettings(newSettings);
+    }
+
     onunload() {
         this.settingTab?.unload()
         this.timer?.destroy()
@@ -119,14 +111,14 @@ export default class PomodoroTimerPlugin extends Plugin {
     }
     async activateView() {
         let { workspace } = this.app
-        let leaf: WorkspaceLeaf | null = null
         let leaves = workspace.getLeavesOfType(VIEW_TYPE_TIMER)
         if (leaves.length > 0) {
-            leaf = leaves[0]
-        } else {
-            leaf = workspace.getRightLeaf(false)
-            await leaf.setViewState({ type: VIEW_TYPE_TIMER, active: true })
+            workspace.detachLeavesOfType(VIEW_TYPE_TIMER)
+            return;
         }
+        
+        let leaf = workspace.getLeftLeaf(false)
+        await leaf.setViewState({ type: VIEW_TYPE_TIMER, active: true })
         workspace.revealLeaf(leaf)
     }
     async activateStatsView() {
@@ -135,7 +127,6 @@ export default class PomodoroTimerPlugin extends Plugin {
         this.app.workspace.revealLeaf(this.app.workspace.getLeavesOfType('stats-view')[0]);
     }
     
-    // --- NUEVA FUNCIÓN DE CORRECCIÓN ---
     async correctLogFileTimes() {
         const settings = this.getSettings();
         if (settings.logFile === 'NONE' || !settings.logPath) {
@@ -144,12 +135,20 @@ export default class PomodoroTimerPlugin extends Plugin {
         }
 
         const logFilePath = settings.logPath.endsWith('.md') ? settings.logPath : `${settings.logPath}.md`;
-        const logFile = this.app.vault.getAbstractFileByPath(logFilePath);
+        const logAbstractFile = this.app.vault.getAbstractFileByPath(logFilePath);
 
-        if (!logFile) {
+        if (!logAbstractFile) {
             new Notice(`Archivo de log no encontrado en: ${logFilePath}`);
             return;
         }
+
+        // --- CAMBIO CLAVE: Verificar que sea una instancia de TFile ---
+        if (!(logAbstractFile instanceof TFile)) {
+            new Notice(`La ruta del log no es un archivo válido: ${logFilePath}`);
+            return;
+        }
+
+        const logFile = logAbstractFile; // Ahora es de tipo TFile
 
         const content = await this.app.vault.read(logFile);
         const lines = content.split('\n');
@@ -180,8 +179,6 @@ export default class PomodoroTimerPlugin extends Plugin {
                 
                 const realDuration = moment.duration(endTime.diff(beginTime)).asMinutes();
 
-                // Condición de corrección: si la duración real es muy corta (ej. < 3 mins)
-                // pero la duración registrada es larga (ej. > 20 mins), es un error.
                 if (realDuration < 3 && loggedDuration > 20) {
                     const correctedEndTime = beginTime.clone().add(loggedDuration, 'minutes');
                     const correctedEndStr = correctedEndTime.format("YYYY-MM-DD HH:mm");

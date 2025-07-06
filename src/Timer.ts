@@ -11,11 +11,9 @@ import type { TaskItem } from 'Tasks'
 
 export type Mode = 'WORK' | 'BREAK'
 
-// --- CAMBIO: La estructura ahora tiene minutos y segundos separados ---
 export type TimerRemained = {
     millis: number
-    minutes: string
-    seconds: string
+    human: string
 }
 
 const DEFAULT_TASK: TaskItem = {
@@ -108,16 +106,15 @@ export default class Timer implements Readable<TimerStore> {
         }
     }
 
-    // --- CAMBIO: La función ahora devuelve un objeto con minutos y segundos ---
     private remain(count: number, elapsed: number): TimerRemained {
         let remained = count - elapsed
         let min = Math.floor(remained / 60000)
         let sec = Math.floor((remained % 60000) / 1000)
-        
+        let minStr = min < 10 ? `0${min}` : min.toString()
+        let secStr = sec < 10 ? `0${sec}` : sec.toString()
         return {
             millis: remained,
-            minutes: min < 10 ? `0${min}` : min.toString(),
-            seconds: sec < 10 ? `0${sec}` : sec.toString(),
+            human: `${minStr} : ${secStr}`,
         }
     }
 
@@ -144,33 +141,17 @@ export default class Timer implements Readable<TimerStore> {
             this.timeup()
         }
     }
-    
-    private timeup(earlyFinish: boolean = false) {
-        let autostart = false;
-        let originalState = { ...this.state };
 
-        if (earlyFinish) {
-            originalState.count = originalState.elapsed;
-        }
-
-        try {
-            const ctx = this.createLogContext(originalState);
-            this.processLog(ctx);
-            autostart = originalState.autostart;
-        } catch (error) {
-            console.error("Error al procesar el log del pomodoro:", error);
-            new Notice("Error al guardar el log, pero la sesión continuará.");
-        } finally {
-            this.update(state => this.endSession(state));
-            if (autostart) {
-                this.start();
-            }
-        }
-    }
-    
-    public finishEarly() {
-        if (this.state.running && this.state.mode === 'WORK') {
-            this.timeup(true);
+    public timeup() {
+        let autostart = false
+        this.update((state) => {
+            const ctx = this.createLogContext(state)
+            this.processLog(ctx)
+            autostart = state.autostart
+            return this.endSession(state)
+        })
+        if (autostart) {
+            this.start()
         }
     }
 
@@ -348,8 +329,14 @@ export default class Timer implements Readable<TimerStore> {
                     state.mode == 'WORK' ? state.workLen : state.breakLen
                 state.count = state.duration * 60 * 1000
             }
+
             return state
         })
+    }
+
+    public setDurations(workLen: number, breakLen: number) {
+        // --- CAMBIO CLAVE: Llamar al nuevo método público en el plugin ---
+        this.plugin.updateSettings({ workLen, breakLen });
     }
 
     public destroy() {

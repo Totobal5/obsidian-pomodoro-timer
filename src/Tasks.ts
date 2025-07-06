@@ -61,21 +61,19 @@ export default class Tasks implements Readable<TaskStore> {
             }),
         )
 
-        this.loadAllVaultTasks(); // Carga inicial de todas las tareas
+        // La carga inicial ahora se activará desde main.ts cuando el layout esté listo.
 
-        // Escucha los cambios en los metadatos de los archivos
+        // Escucha los cambios en los metadatos de los archivos para actualizar las tareas dinámicamente
         this.plugin.registerEvent(
             plugin.app.metadataCache.on(
                 'changed',
                 (file: TFile, data: string, cache: CachedMetadata) => {
-                    // En lugar de recargar todo, actualizamos solo el archivo que cambió
                     this.updateTasksFromFile(file, data, cache);
                 },
             ),
         )
     }
 
-    // NUEVO: Método optimizado para actualizar tareas de un solo archivo
     public updateTasksFromFile(file: TFile, content: string, metadata: CachedMetadata) {
         const newTasks = resolveTasks(
             this.plugin.getSettings().taskFormat,
@@ -85,15 +83,11 @@ export default class Tasks implements Readable<TaskStore> {
         );
 
         this._store.update((state) => {
-            // 1. Filtra la lista para eliminar las tareas antiguas del archivo modificado
             const otherTasks = state.list.filter(task => task.path !== file.path);
-            
-            // 2. Combina las tareas de otros archivos con las nuevas tareas del archivo modificado
             state.list = [...otherTasks, ...newTasks];
             return state;
         });
 
-        // Sincroniza la tarea activa por si ha sido modificada
         if (this.plugin.tracker?.task?.blockLink) {
             let task = newTasks.find(
                 (item) =>
@@ -116,13 +110,15 @@ export default class Tasks implements Readable<TaskStore> {
             try {
                 const content = await this.plugin.app.vault.cachedRead(file);
                 const metadata = this.plugin.app.metadataCache.getFileCache(file);
-                const tasksInFile = resolveTasks(
-                    this.plugin.getSettings().taskFormat,
-                    file,
-                    content,
-                    metadata
-                );
-                allTasks.push(...tasksInFile);
+                if (metadata) { // Asegurarse de que los metadatos están disponibles
+                    const tasksInFile = resolveTasks(
+                        this.plugin.getSettings().taskFormat,
+                        file,
+                        content,
+                        metadata
+                    );
+                    allTasks.push(...tasksInFile);
+                }
             } catch (e) {
                 console.error(`Error procesando el archivo ${file.path}:`, e);
             }
